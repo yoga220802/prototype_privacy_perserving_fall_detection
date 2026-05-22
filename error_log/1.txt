@@ -1,0 +1,28 @@
+ImportError: cannot import name 'torch_int' from 'transformers.utils' (D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\transformers\utils\__init__.py)
+
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+             ^^^^^^
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "D:\prototype_privacy_perserving_fall_detection\app.py", line 10, in <module>
+    from rfdetr import RFDETRNano
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\__init__.py", line 12, in <module>
+    from rfdetr.detr import (
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\detr.py", line 50, in <module>
+    from rfdetr.main import Model
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\main.py", line 48, in <module>
+    from rfdetr.models import PostProcess, build_criterion_and_postprocessors, build_model
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\models\__init__.py", line 16, in <module>
+    from rfdetr.models.lwdetr import PostProcess, build_criterion_and_postprocessors, build_model
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\models\lwdetr.py", line 31, in <module>
+    from rfdetr.models.backbone import build_backbone
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\models\backbone\__init__.py", line 15, in <module>
+    from rfdetr.models.backbone.backbone import *
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\models\backbone\backbone.py", line 25, in <module>
+    from rfdetr.models.backbone.dinov2 import DinoV2
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\models\backbone\dinov2.py", line 17, in <module>
+    from rfdetr.models.backbone.dinov2_with_windowed_attn import (
+File "D:\prototype_privacy_perserving_fall_detection\venv\Lib\site-packages\rfdetr\models\backbone\dinov2_with_windowed_attn.py", line 27, in <module>
+    from transformers.utils import (
