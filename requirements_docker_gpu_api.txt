@@ -1,0 +1,18 @@
+# Requirements Docker GPU API.
+# Torch/torchvision/torchaudio sudah tersedia dari base image:
+# pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
+
+numpy>=1.26.4,<2.0
+pillow>=10.4.0,<12.0.0
+opencv-python-headless>=4.10.0.84,<5.0.0
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+
+ultralytics>=8.3.0
+supervision>=0.25.0
+pytorch-lightning>=2.4.0
+
+rfdetr==1.7.0
+transformers==5.9.0
