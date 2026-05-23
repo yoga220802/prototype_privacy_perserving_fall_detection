@@ -4,6 +4,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyd
 
 # =========================
 # Virtual Environment
@@ -12,6 +14,30 @@ venv/
 .venv/
 env/
 ENV/
+.venv-camera/
+venv-camera/
+.venv*/
+venv*/
+
+# =========================
+# Python packaging / build
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+
+# =========================
+# Pip / Python cache
+# =========================
+pip-wheel-metadata/
+pip-cache/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # =========================
 # Streamlit
@@ -33,12 +59,15 @@ ENV/
 # Logs
 # =========================
 *.log
+error_log/
+logs/
 
 # =========================
 # OS Files
 # =========================
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # =========================
 # VSCode / IDE
@@ -47,15 +76,47 @@ Thumbs.db
 .idea/
 
 # =========================
+# Docker local/cache files
+# =========================
+.docker/
+docker-data/
+docker-volumes/
+
+# =========================
 # Deep Learning Models
-# Exclude all PyTorch models
-# inside models/
+# Exclude model/checkpoint files
 # =========================
 models/**/*.pt
 models/**/*.pth
 models/**/*.ckpt
 models/**/*.bin
+models/**/*.onnx
+models/**/*.engine
+models/**/*.safetensors
 
-# Optional:
-# keep folder structure tracked
+# Keep model folder structure
 !models/.gitkeep
+
+# =========================
+# ML experiment outputs
+# =========================
+runs/
+wandb/
+mlruns/
+outputs/
+checkpoints/
+
+# =========================
+# Ultralytics / YOLO cache
+# =========================
+Ultralytics/
+.ultralytics/
+yolo_settings.json
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.temp
+*.bak
+*.swp
