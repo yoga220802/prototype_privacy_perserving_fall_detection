@@ -61,6 +61,24 @@ Setelah semua siap, jalankan aplikasi menggunakan Streamlit:
 streamlit run app.py
 ```
 
+## 🐳 Versi Docker
+Proyek ini juga mendukung dijalankan dalam container Docker dengan GPU menggunakan nama container `fall-detection-gpu`.
+
+1. Bangun image Docker:
+```bash
+docker compose build
+```
+2. Jalankan container:
+```bash
+docker compose up -d
+```
+3. Buka aplikasi di browser:
+```text
+http://localhost:8501
+```
+
+Lihat `DOCKER.md` untuk detail lengkap.
+
 ## 🛠 Cara Penggunaan
 1. Buka browser pada alamat yang tertera (biasanya `http://localhost:8501`).
 2. Pilih metode input di Sidebar:
