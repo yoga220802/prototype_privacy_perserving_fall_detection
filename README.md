@@ -53,7 +53,7 @@ Anda perlu memastikan file model berada di folder `models/`.
    mv yolo11l-pose.pt models/
    ```
 2. **Model RF-DETR:** Unduh secara manual file `rfdetr_nano_skeleton.pth` melalui tautan berikut dan letakkan di dalam folder `models/`:
-   - [Download RF-DETR Model (Google Drive)](https://drive.google.com/file/d/1PRTq1m9J3B8jIxHCFaU54t5Ugyscqo6V/view?usp=drive_link)
+   - [Download RF-DETR Model (Google Drive)](https://drive.google.com/file/d/1oPN5HuGNY9b7hdUjryLMAQzCbOW2GJVz/view?usp=sharing)
 
 ### 4. Menjalankan Aplikasi
 Setelah semua siap, jalankan aplikasi menggunakan Streamlit:
