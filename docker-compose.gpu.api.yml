@@ -1,0 +1,21 @@
+services:
+  fall-detection-gpu-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu.api
+    image: fall-detection:gpu-api
+    container_name: fall-detection-gpu-api
+    ports:
+      - "8000:8000"
+    shm_size: "4gb"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
