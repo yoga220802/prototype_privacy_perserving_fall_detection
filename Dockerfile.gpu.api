@@ -1,0 +1,34 @@
+# Dockerfile GPU Inference API.
+# Kamera berjalan native di Windows melalui host_camera_client.py.
+# Docker hanya menjalankan model YOLO + RF-DETR dengan CUDA.
+
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    ffmpeg \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements_docker_gpu_api.txt /app/requirements_docker_gpu_api.txt
+
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    pip install -r /app/requirements_docker_gpu_api.txt
+
+COPY app_inference_api.py /app/app_inference_api.py
+COPY models /app/models
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app_inference_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

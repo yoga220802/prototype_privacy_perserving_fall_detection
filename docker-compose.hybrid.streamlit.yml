@@ -1,0 +1,39 @@
+services:
+  fall-detection-gpu-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu.api
+    image: fall-detection:gpu-api
+    container_name: fall-detection-gpu-api
+    ports:
+      - "8000:8000"
+    shm_size: "4gb"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  fall-detection-streamlit-viewer:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit.viewer
+    image: fall-detection:streamlit-viewer
+    container_name: fall-detection-streamlit-viewer
+    ports:
+      - "8501:8501"
+    environment:
+      API_INTERNAL_URL: "http://fall-detection-gpu-api:8000"
+      BRIDGE_INTERNAL_URL: "http://host.docker.internal:7001"
+      BRIDGE_BROWSER_URL: "http://localhost:7001"
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    depends_on:
+      - fall-detection-gpu-api
+    restart: unless-stopped
