@@ -13,3 +13,8 @@ supervision
 pytorch-lightning
 rfdetr==1.7.0
 transformers==5.9.0
+
+psutil
+gputil
+moviepy
+imageio-ffmpeg
