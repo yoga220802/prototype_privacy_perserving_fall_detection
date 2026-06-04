@@ -1,6 +1,9 @@
 import argparse
 import threading
 import time
+import sys
+import ctypes
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -9,6 +12,51 @@ import requests
 import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse, StreamingResponse
+
+
+alarm_playing = False
+
+def play_alarm_native():
+    global alarm_playing
+    if alarm_playing:
+        return
+    sound_dir = Path("assets/sound")
+    if not sound_dir.exists():
+        return
+    alarm_files = list(sound_dir.glob("alarm.*"))
+    if not alarm_files:
+        return
+    file_path = alarm_files[0].resolve()
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.winmm.mciSendStringW('close alarm', None, 0, 0)
+            open_cmd = f'open "{file_path}" type mpegvideo alias alarm'
+            res = ctypes.windll.winmm.mciSendStringW(open_cmd, None, 0, 0)
+            if res == 0:
+                ctypes.windll.winmm.mciSendStringW('play alarm repeat', None, 0, 0)
+                alarm_playing = True
+                print(f"[INFO] Alarm native aktif: memutar {file_path.name}")
+        except Exception as e:
+            print(f"[WARNING] Gagal memutar alarm secara native: {e}")
+    else:
+        print(f"\a[INFO] ALARM AKTIF (Non-Windows): memutar {file_path.name}")
+        alarm_playing = True
+
+def stop_alarm_native():
+    global alarm_playing
+    if not alarm_playing:
+        return
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.winmm.mciSendStringW('stop alarm', None, 0, 0)
+            ctypes.windll.winmm.mciSendStringW('close alarm', None, 0, 0)
+            alarm_playing = False
+            print("[INFO] Alarm native dinonaktifkan")
+        except Exception as e:
+            print(f"[WARNING] Gagal menghentikan alarm: {e}")
+    else:
+        print("[INFO] Alarm dinonaktifkan")
+        alarm_playing = False
 
 
 def parse_args():
@@ -88,6 +136,9 @@ def inference_worker_loop():
     local_last_frame = None
     local_last_frame_id = -1
 
+    fall_start_time = None
+    alarm_triggered = False
+
     while running:
         with lock:
             current_raw = raw_jpeg
@@ -127,12 +178,36 @@ def inference_worker_loop():
 
             latency_ms = (time.perf_counter() - start) * 1000.0
 
+            # Baca status deteksi jatuh dari header respon
+            fall_detected_str = response.headers.get("X-Fall-Detected", "False")
+            fall_detected = (fall_detected_str == "True")
+
+            if fall_detected:
+                if fall_start_time is None:
+                    fall_start_time = time.time()
+                else:
+                    elapsed = time.time() - fall_start_time
+                    if elapsed >= 5.0:
+                        if not alarm_triggered:
+                            play_alarm_native()
+                            alarm_triggered = True
+            else:
+                fall_start_time = None
+                if alarm_triggered:
+                    stop_alarm_native()
+                    alarm_triggered = False
+
             with lock:
                 result_jpeg = response.content
                 last_api_latency_ms = latency_ms
                 last_error = ""
 
         except Exception as exc:
+            # Reset timer jika terjadi error (misal koneksi timeout) demi keamanan
+            fall_start_time = None
+            if alarm_triggered:
+                stop_alarm_native()
+                alarm_triggered = False
             with lock:
                 last_error = str(exc)
 
@@ -249,6 +324,13 @@ def mjpeg_generator(kind: str):
 def startup():
     threading.Thread(target=camera_loop, daemon=True).start()
     threading.Thread(target=inference_worker_loop, daemon=True).start()
+
+
+@app.on_event("shutdown")
+def shutdown():
+    global running
+    running = False
+    stop_alarm_native()
 
 
 @app.get("/")

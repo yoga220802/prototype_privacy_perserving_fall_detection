@@ -78,6 +78,43 @@ CLASSES = ["Fall", "No-Fall"]
 DEFAULT_DROIDCAM_URL = "http://192.168.0.111:4747/video"
 MODEL_DIR = Path("models")
 
+
+_cached_alarm_html = None
+
+def get_alarm_audio_html() -> str:
+    global _cached_alarm_html
+    if _cached_alarm_html is not None:
+        return _cached_alarm_html
+
+    sound_dir = Path("assets/sound")
+    if not sound_dir.exists():
+        _cached_alarm_html = ""
+        return ""
+
+    alarm_files = list(sound_dir.glob("alarm.*"))
+    if not alarm_files:
+        _cached_alarm_html = ""
+        return ""
+
+    file_path = alarm_files[0]
+    try:
+        data = file_path.read_bytes()
+        b64 = base64.b64encode(data).decode()
+        ext = file_path.suffix.lower().replace(".", "")
+        mime = f"audio/{ext}"
+        if ext == "mp3":
+            mime = "audio/mpeg"
+
+        _cached_alarm_html = f"""
+        <audio autoplay loop style="display:none;">
+            <source src="data:{mime};base64,{b64}" type="{mime}">
+        </audio>
+        """
+    except Exception as e:
+        print(f"Error loading alarm audio: {e}")
+        _cached_alarm_html = ""
+    return _cached_alarm_html
+
 SKELETON_EDGES = [
     (0, 1),
     (0, 2),
@@ -1282,7 +1319,10 @@ elif source_option == "Inferensi Realtime":
                 fp2 = None
 
             det_text = st.empty()
+            alarm_placeholder = st.empty()
             prev_metrics = None
+            fall_start_time = None
+            alarm_active = False
 
             while run_cam:
                 ret, frame_bgr = cap.read()
@@ -1304,6 +1344,31 @@ elif source_option == "Inferensi Realtime":
                     fp2.image(skeleton, channels="RGB")
                 fp3.image(annotated, channels="RGB")
                 det_text.write(f"**Deteksi:** {format_detection_result(pred)}")
+
+                # Cek deteksi jatuh secara terus menerus selama 5 detik
+                is_fall_detected = False
+                if pred and pred.get("class_id") is not None:
+                    is_fall_detected = any(int(cid) == 0 for cid in pred["class_id"])
+
+                if is_fall_detected:
+                    if fall_start_time is None:
+                        fall_start_time = time.time()
+                    else:
+                        elapsed = time.time() - fall_start_time
+                        if elapsed >= 5.0:
+                            if not alarm_active:
+                                alarm_html = get_alarm_audio_html()
+                                if alarm_html:
+                                    alarm_placeholder.markdown(alarm_html, unsafe_allow_html=True)
+                                    st.toast("🚨 DETEKSI JATUH TERUS MENERUS! ALARM AKTIF!", icon="🚨")
+                                else:
+                                    alarm_placeholder.error("🚨 ALARM: Jatuh terdeteksi terus menerus (file suara tidak ditemukan di assets/sound)!")
+                                alarm_active = True
+                else:
+                    fall_start_time = None
+                    if alarm_active:
+                        alarm_placeholder.empty()
+                        alarm_active = False
 
                 mstr = {
                     "fps": f"{metrics['fps']:.2f}",
@@ -1330,6 +1395,7 @@ elif source_option == "Inferensi Realtime":
                     prev_metrics = mstr
 
             cap.release()
+            alarm_placeholder.empty()
 
 
 # =========================================================

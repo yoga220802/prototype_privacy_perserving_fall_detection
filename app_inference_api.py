@@ -149,10 +149,11 @@ def extract_skeleton_canvas(img_square_rgb: np.ndarray) -> np.ndarray:
     return black_canvas
 
 
-def annotate_detection(skeleton_canvas: np.ndarray, conf_detection: float) -> np.ndarray:
+def annotate_detection(skeleton_canvas: np.ndarray, conf_detection: float) -> Tuple[np.ndarray, bool]:
     with torch.inference_mode():
         raw_dets = rfdetr_model.predict(skeleton_canvas, threshold=conf_detection)
 
+    fall_detected = False
     if (
         hasattr(raw_dets, "xyxy")
         and raw_dets.xyxy is not None
@@ -163,6 +164,8 @@ def annotate_detection(skeleton_canvas: np.ndarray, conf_detection: float) -> np
             class_id=np.asarray(raw_dets.class_id).astype(int),
             confidence=np.asarray(raw_dets.confidence).astype(float),
         )
+
+        fall_detected = any(cid == 0 for cid in dets.class_id)
 
         box_annotator = sv.BoxAnnotator(thickness=4)
         label_annotator = sv.LabelAnnotator(text_thickness=2, text_scale=0.8)
@@ -181,9 +184,9 @@ def annotate_detection(skeleton_canvas: np.ndarray, conf_detection: float) -> np
             detections=dets,
             labels=labels,
         )
-        return annotated_output
+        return annotated_output, fall_detected
 
-    return skeleton_canvas.copy()
+    return skeleton_canvas.copy(), fall_detected
 
 
 def make_side_by_side(
@@ -257,7 +260,7 @@ async def predict(
 
     img_square_rgb = letterbox_image(img_rgb, target_size)
     skeleton_canvas = extract_skeleton_canvas(img_square_rgb)
-    annotated_output = annotate_detection(skeleton_canvas, conf)
+    annotated_output, fall_detected = annotate_detection(skeleton_canvas, conf)
 
     if view == "skeleton":
         out_rgb = skeleton_canvas
@@ -281,6 +284,7 @@ async def predict(
     headers = {
         "X-Inference-Time-Ms": f"{elapsed_ms:.2f}",
         "X-Device": DEVICE.type,
+        "X-Fall-Detected": "True" if fall_detected else "False",
     }
 
     return StreamingResponse(

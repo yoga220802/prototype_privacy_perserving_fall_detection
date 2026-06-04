@@ -8,6 +8,7 @@ Proyek ini adalah sistem deteksi jatuh (fall detection) yang mengutamakan privas
 - **Multi-Model Pipeline:**
   - **YOLOv11-Pose:** Digunakan untuk ekstraksi keypoints (skeleton) yang akurat.
   - **RF-DETR Nano:** Model transformer yang ringan untuk klasifikasi "Fall" (Jatuh) atau "No-Fall" (Tidak Jatuh) dari data skeleton.
+- **Alarm Suara Deteksi Jatuh:** Menyalakan alarm suara jika kondisi jatuh terdeteksi terus-menerus selama 5 detik tanpa perubahan kondisi.
 - **Antarmuka Streamlit:** UI yang intuitif dan mudah digunakan.
 - **Akselerasi Hardware:** Mendukung penggunaan GPU (CUDA) untuk performa yang lebih cepat.
 
@@ -16,6 +17,8 @@ Proyek ini adalah sistem deteksi jatuh (fall detection) yang mengutamakan privas
 .
 ├── app.py                   # Entry point aplikasi (Streamlit)
 ├── requirements.txt         # Daftar dependensi Python
+├── assets/                  # Folder aset statis
+│   └── sound/               # Penyimpanan file alarm (alarm.mp3/alarm.wav)
 ├── models/                  # Folder penyimpanan model (.pt / .pth)
 │   ├── model_download.py    # Skrip untuk mengunduh model YOLO
 │   └── ...
@@ -89,6 +92,24 @@ Lihat `DOCKER.md` untuk detail lengkap.
    - **RGB Masukan:** Gambar asli (sudah di-resize).
    - **Skeleton Pose:** Hasil ekstraksi kerangka tubuh pada kanvas hitam.
    - **Prediksi RF-DETR:** Hasil deteksi jatuh pada data skeleton.
+
+## 🔔 Fitur Alarm Suara
+Prototipe ini dilengkapi dengan alarm suara yang akan berbunyi secara otomatis jika terdeteksi kondisi **Fall (Jatuh)** secara terus-menerus selama **5 detik**.
+
+### Cara Mengaktifkan:
+1. Buat folder `assets/sound/` di direktori root proyek (telah dibuat secara default).
+2. Simpan file suara alarm Anda di folder tersebut dengan nama `alarm.mp3`, `alarm.wav`, atau `alarm.ogg`.
+3. Jalankan aplikasi seperti biasa. Sistem akan mendeteksi file suara tersebut secara otomatis saat alarm aktif.
+
+### Perilaku Suara:
+* **Mode Streamlit Lokal (`app.py`):** Suara alarm dimainkan secara internal di web browser melalui tag audio HTML5.
+* **Mode Hybrid (`host_camera_mjpeg_bridge.py`):** Suara alarm dimainkan secara native melalui API Windows Media (MCI) pada speaker komputer host.
+* **Penghentian Otomatis:** Ketika kondisi berubah (jatuh tidak lagi terdeteksi atau kamera dinonaktifkan), alarm suara akan berhenti secara instan.
+
+## 🖥️ Mode Hybrid (Streamlit + Windows Native Camera + Docker GPU)
+Bagi pengguna yang ingin menjalankan pemrosesan model di dalam container Docker GPU tetapi tetap menginginkan kualitas input kamera yang optimal dekat dengan native Windows, proyek ini menyediakan Mode Hybrid.
+
+Panduan lengkap mengenai arsitektur, instalasi, dan cara penggunaan Mode Hybrid dapat dibaca pada file dokumentasi terpisah: [HYBRID_STREAMLIT_NATIVE_CAMERA_README.md](file:///D:/prototype_privacy_perserving_fall_detection/HYBRID_STREAMLIT_NATIVE_CAMERA_README.md).
 
 ## 💻 Teknologi yang Digunakan
 - **Bahasa:** Python 3.x
