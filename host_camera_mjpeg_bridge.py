@@ -21,11 +21,13 @@ def play_alarm_native():
     if alarm_playing:
         return
     sound_dir = Path("assets/sound")
-    if not sound_dir.exists():
+    if not sound_dir.exists() or not list(sound_dir.glob("alarm.*")):
+        # Fallback jika folder atau file audio tidak ada
+        print("\a[WARNING] ALARM AKTIF: Jatuh terdeteksi terus menerus! (File audio tidak ditemukan di assets/sound/)", flush=True)
+        alarm_playing = True
         return
+
     alarm_files = list(sound_dir.glob("alarm.*"))
-    if not alarm_files:
-        return
     file_path = alarm_files[0].resolve()
     if sys.platform == "win32":
         try:
@@ -46,6 +48,13 @@ def stop_alarm_native():
     global alarm_playing
     if not alarm_playing:
         return
+    sound_dir = Path("assets/sound")
+    # Jika sebelumnya alarm aktif tapi file suara tidak ada, cukup reset status
+    if not sound_dir.exists() or not list(sound_dir.glob("alarm.*")):
+        alarm_playing = False
+        print("[INFO] Alarm dinonaktifkan (kembali normal)")
+        return
+
     if sys.platform == "win32":
         try:
             ctypes.windll.winmm.mciSendStringW('stop alarm', None, 0, 0)

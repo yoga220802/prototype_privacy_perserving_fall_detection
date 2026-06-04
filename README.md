@@ -106,6 +106,11 @@ Prototipe ini dilengkapi dengan alarm suara yang akan berbunyi secara otomatis j
 * **Mode Hybrid (`host_camera_mjpeg_bridge.py`):** Suara alarm dimainkan secara native melalui API Windows Media (MCI) pada speaker komputer host.
 * **Penghentian Otomatis:** Ketika kondisi berubah (jatuh tidak lagi terdeteksi atau kamera dinonaktifkan), alarm suara akan berhenti secara instan.
 
+### Fallback (Jika File Suara Tidak Ada):
+Jika folder `assets/sound/` kosong atau file audio alarm belum disediakan, sistem memiliki mekanisme fallback agar aplikasi tetap berjalan aman tanpa crash:
+* **Mode Streamlit Lokal (`app.py`):** Halaman web Streamlit menampilkan pesan peringatan visual berwarna merah: `"🚨 ALARM: Jatuh terdeteksi terus menerus (file suara tidak ditemukan di assets/sound)!"`
+* **Mode Hybrid (`host_camera_mjpeg_bridge.py`):** Konsol terminal akan mencetak pesan peringatan `"🚨 [WARNING] ALARM AKTIF..."` disertai dengan bunyi beep bel bawaan sistem komputer (`\a`).
+
 ## 🖥️ Mode Hybrid (Streamlit + Windows Native Camera + Docker GPU)
 Bagi pengguna yang ingin menjalankan pemrosesan model di dalam container Docker GPU tetapi tetap menginginkan kualitas input kamera yang optimal dekat dengan native Windows, proyek ini menyediakan Mode Hybrid.
 
