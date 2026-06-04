@@ -94,7 +94,15 @@ Lihat `DOCKER.md` untuk detail lengkap.
    - **Prediksi RF-DETR:** Hasil deteksi jatuh pada data skeleton.
 
 ## 🔔 Fitur Alarm Suara
-Prototipe ini dilengkapi dengan alarm suara yang akan berbunyi secara otomatis jika terdeteksi kondisi **Fall (Jatuh)** secara terus-menerus selama **5 detik**.
+Prototipe ini dilengkapi dengan alarm suara yang akan berbunyi secara otomatis jika terdeteksi kondisi **Fall (Jatuh)** secara terus-menerus selama durasi toleransi waktu yang ditentukan (default **5 detik**).
+
+### Mengonfigurasi Waktu Toleransi Alarm:
+Anda dapat menyesuaikan berapa lama kondisi jatuh ditoleransi sebelum alarm dipicu:
+* **Mode Streamlit Lokal (`app.py`):** Gunakan slider **"Toleransi Waktu Alarm (detik)"** yang terletak di Sidebar untuk memilih durasi antara 1.0 hingga 30.0 detik.
+* **Mode Hybrid (`host_camera_mjpeg_bridge.py`):** Jalankan skrip bridge native di Windows dengan menyertakan argumen `--alarm-delay`. Contoh pemanggilan untuk delay 10 detik:
+  ```powershell
+  python host_camera_mjpeg_bridge.py --alarm-delay 10.0
+  ```
 
 ### Cara Mengaktifkan:
 1. Buat folder `assets/sound/` di direktori root proyek (telah dibuat secara default).

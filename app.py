@@ -1222,6 +1222,14 @@ source_option = st.sidebar.radio(
     ["Unggah Gambar", "Inferensi Realtime", "Unggah Video", "Mode Testing"],
 )
 conf_detection = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.25, 0.05)
+alarm_delay = st.sidebar.slider(
+    "Toleransi Waktu Alarm (detik)",
+    1.0,
+    30.0,
+    5.0,
+    0.5,
+    help="Berapa lama waktu deteksi jatuh terus-menerus sebelum alarm berbunyi.",
+)
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
@@ -1345,7 +1353,7 @@ elif source_option == "Inferensi Realtime":
                 fp3.image(annotated, channels="RGB")
                 det_text.write(f"**Deteksi:** {format_detection_result(pred)}")
 
-                # Cek deteksi jatuh secara terus menerus selama 5 detik
+                # Cek deteksi jatuh secara terus menerus selama waktu toleransi yang ditentukan
                 is_fall_detected = False
                 if pred and pred.get("class_id") is not None:
                     is_fall_detected = any(int(cid) == 0 for cid in pred["class_id"])
@@ -1355,14 +1363,14 @@ elif source_option == "Inferensi Realtime":
                         fall_start_time = time.time()
                     else:
                         elapsed = time.time() - fall_start_time
-                        if elapsed >= 5.0:
+                        if elapsed >= alarm_delay:
                             if not alarm_active:
                                 alarm_html = get_alarm_audio_html()
                                 if alarm_html:
                                     alarm_placeholder.markdown(alarm_html, unsafe_allow_html=True)
                                     st.toast("🚨 DETEKSI JATUH TERUS MENERUS! ALARM AKTIF!", icon="🚨")
                                 else:
-                                    alarm_placeholder.error("🚨 ALARM: Jatuh terdeteksi terus menerus (file suara tidak ditemukan di assets/sound)!")
+                                    alarm_placeholder.error(f"🚨 ALARM: Jatuh terdeteksi terus menerus selama {alarm_delay} detik (file suara tidak ditemukan di assets/sound)!")
                                 alarm_active = True
                 else:
                     fall_start_time = None

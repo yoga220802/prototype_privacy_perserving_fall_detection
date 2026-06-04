@@ -94,6 +94,12 @@ def parse_args():
         default="triple",
         help="triple = RGB + skeleton + prediksi seperti tampilan Streamlit lama",
     )
+    parser.add_argument(
+        "--alarm-delay",
+        type=float,
+        default=5.0,
+        help="Toleransi waktu jatuh terus-menerus sebelum alarm berbunyi (detik)",
+    )
 
     return parser.parse_args()
 
@@ -196,7 +202,7 @@ def inference_worker_loop():
                     fall_start_time = time.time()
                 else:
                     elapsed = time.time() - fall_start_time
-                    if elapsed >= 5.0:
+                    if elapsed >= args.alarm_delay:
                         if not alarm_triggered:
                             play_alarm_native()
                             alarm_triggered = True
