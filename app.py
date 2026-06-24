@@ -875,6 +875,310 @@ def process_image_all_models(
     return results, records
 
 
+def extract_images_from_uploaded_files(uploaded_files: List) -> List[Tuple[str, np.ndarray]]:
+    """
+    Extracts images from a list of uploaded files (which can be images or zip archives).
+    Returns a list of tuples: (filename, image_rgb_numpy_array)
+    """
+    extracted_images = []
+    for uploaded_file in uploaded_files:
+        filename = uploaded_file.name
+        if filename.lower().endswith(".zip"):
+            try:
+                zip_data = uploaded_file.read()
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+                    for name in zf.namelist():
+                        if name.endswith("/") or name.startswith("__MACOSX"):
+                            continue
+                        ext = name.split(".")[-1].lower()
+                        if ext in ["jpg", "jpeg", "png"]:
+                            try:
+                                with zf.open(name) as f:
+                                    img_data = f.read()
+                                    img = Image.open(io.BytesIO(img_data)).convert("RGB")
+                                    extracted_images.append((Path(name).name, np.array(img)))
+                            except Exception as e:
+                                st.warning(f"Gagal membaca gambar {name} dari ZIP: {e}")
+            except Exception as e:
+                st.error(f"Gagal mengekstrak file ZIP {filename}: {e}")
+        else:
+            try:
+                img = Image.open(uploaded_file).convert("RGB")
+                extracted_images.append((filename, np.array(img)))
+            except Exception as e:
+                st.error(f"Gagal membaca file gambar {filename}: {e}")
+    return extracted_images
+
+
+def process_bulk_images(
+    extracted_images: List[Tuple[str, np.ndarray]], threshold: float, progress_container
+) -> Tuple[Dict[str, Dict[str, Dict]], List[Dict]]:
+    bulk_results = {filename: {} for filename, _ in extracted_images}
+    records = []
+    pose_model = load_pose_model_cached()
+
+    for cfg in MODEL_CONFIGS:
+        weight_path = resolve_model_path(cfg)
+        if weight_path is None:
+            for filename, _ in extracted_images:
+                bulk_results[filename][cfg.key] = {
+                    "error": f"Weight tidak ditemukan. Kandidat: {cfg.weight_candidates}"
+                }
+            continue
+
+        progress_container.info(f"Memuat model {cfg.display_name}...")
+        try:
+            detector = load_detector_uncached(cfg)
+        except Exception as e:
+            for filename, _ in extracted_images:
+                bulk_results[filename][cfg.key] = {
+                    "error": f"Gagal memuat model: {e}"
+                }
+            continue
+
+        try:
+            for filename, image_rgb in extracted_images:
+                progress_container.info(f"Memproses [{filename}] menggunakan {cfg.display_name}...")
+                try:
+                    padded, skeleton, annotated, pred, metrics = process_single_frame(
+                        image_rgb,
+                        cfg,
+                        detector,
+                        pose_model if cfg.input_mode == "Skeleton" else None,
+                        threshold,
+                    )
+                    png_bytes = encode_png_bytes(annotated)
+                    result = {
+                        "cfg": cfg,
+                        "padded": padded,
+                        "skeleton": skeleton,
+                        "annotated": annotated,
+                        "pred": pred,
+                        "metrics": metrics,
+                        "png_bytes": png_bytes,
+                    }
+                    bulk_results[filename][cfg.key] = result
+                    records.append(
+                        metric_record_base(cfg, pred, metrics, extra={"source_type": "image_bulk", "image_name": filename})
+                    )
+                except Exception as e:
+                    bulk_results[filename][cfg.key] = {
+                        "error": f"Error memproses: {e}"
+                    }
+        finally:
+            unload_model(detector)
+
+    progress_container.success("Semua model selesai memproses gambar.")
+    return bulk_results, records
+
+
+def extract_videos_from_uploaded_files(uploaded_files: List) -> List[Tuple[str, Path]]:
+    """
+    Extracts videos from a list of uploaded files (which can be videos or zip archives).
+    Returns a list of tuples: (filename, temp_video_path)
+    """
+    extracted_videos = []
+    for uploaded_file in uploaded_files:
+        filename = uploaded_file.name
+        suffix = Path(filename).suffix.lower()
+        if suffix == ".zip":
+            try:
+                zip_data = uploaded_file.read()
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+                    for name in zf.namelist():
+                        if name.endswith("/") or name.startswith("__MACOSX"):
+                            continue
+                        ext = name.split(".")[-1].lower()
+                        if ext in ["mp4", "avi", "mov", "mkv"]:
+                            try:
+                                with zf.open(name) as f:
+                                    video_data = f.read()
+                                    temp_video = (
+                                        Path(tempfile.gettempdir())
+                                        / f"extracted_{int(time.time() * 1000)}_{Path(name).name}"
+                                    )
+                                    temp_video.write_bytes(video_data)
+                                    extracted_videos.append((Path(name).name, temp_video))
+                            except Exception as e:
+                                st.warning(f"Gagal mengekstrak video {name} dari ZIP: {e}")
+            except Exception as e:
+                st.error(f"Gagal mengekstrak file ZIP {filename}: {e}")
+        elif suffix in [".mp4", ".avi", ".mov", ".mkv"]:
+            try:
+                temp_video = (
+                    Path(tempfile.gettempdir())
+                    / f"uploaded_{int(time.time() * 1000)}_{filename}"
+                )
+                temp_video.write_bytes(uploaded_file.read())
+                extracted_videos.append((filename, temp_video))
+            except Exception as e:
+                st.error(f"Gagal menulis video {filename}: {e}")
+    return extracted_videos
+
+
+def process_video_with_detector(
+    input_video_path: Path,
+    cfg: ModelConfig,
+    detector,
+    pose_model,
+    threshold: float,
+    progress,
+    status,
+    source_type: str = "video_upload"
+) -> Tuple[Optional[Path], Optional[str], List[Dict], Optional[str]]:
+    records: List[Dict] = []
+    writer = None
+    output_path = None
+    mime = None
+
+    try:
+        if MOVIEPY_AVAILABLE:
+            clip = VideoFileClip(str(input_video_path))
+            fps = float(clip.fps or 25)
+            total_frames = max(1, int((clip.duration or 0) * fps))
+            writer, output_path, mime = create_video_writer(
+                f"{safe_filename(cfg.display_name)}", fps
+            )
+
+            for idx, frame_rgb in enumerate(clip.iter_frames(fps=fps, dtype="uint8")):
+                padded, skeleton, annotated, pred, metrics = process_single_frame(
+                    frame_rgb, cfg, detector, pose_model, threshold
+                )
+                writer.write(annotated)
+                timestamp = idx / fps
+                records.append(
+                    metric_record_base(
+                        cfg,
+                        pred,
+                        metrics,
+                        extra={
+                            "source_type": source_type,
+                            "frame_index": idx,
+                            "timestamp_sec": f"{timestamp:.2f}",
+                        },
+                    )
+                )
+                progress.progress(min((idx + 1) / total_frames, 1.0))
+            clip.close()
+        else:
+            cap = cv2.VideoCapture(str(input_video_path))
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 25)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 1)
+            writer, output_path, mime = create_video_writer(
+                f"{safe_filename(cfg.display_name)}", fps
+            )
+
+            idx = 0
+            while True:
+                ret, frame_bgr = cap.read()
+                if not ret:
+                    break
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                padded, skeleton, annotated, pred, metrics = process_single_frame(
+                    frame_rgb, cfg, detector, pose_model, threshold
+                )
+                writer.write(annotated)
+                timestamp = idx / fps
+                records.append(
+                    metric_record_base(
+                        cfg,
+                        pred,
+                        metrics,
+                        extra={
+                            "source_type": source_type,
+                            "frame_index": idx,
+                            "timestamp_sec": f"{timestamp:.2f}",
+                        },
+                    )
+                )
+                idx += 1
+                progress.progress(min(idx / max(total_frames, 1), 1.0))
+            cap.release()
+    except Exception as e:
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                pass
+        return None, None, [], f"Error memproses video: {e}"
+
+    if writer is not None:
+        writer.close()
+
+    return output_path, mime, records, None
+
+
+def process_bulk_videos(
+    extracted_videos: List[Tuple[str, Path]], threshold: float, progress_container
+) -> Tuple[Dict[str, Dict[str, Dict]], List[Dict]]:
+    bulk_results = {filename: {} for filename, _ in extracted_videos}
+    all_records = []
+    pose_model = load_pose_model_cached()
+
+    for cfg in MODEL_CONFIGS:
+        weight_path = resolve_model_path(cfg)
+        if weight_path is None:
+            for filename, _ in extracted_videos:
+                bulk_results[filename][cfg.key] = {
+                    "error": f"Weight tidak ditemukan. Kandidat: {cfg.weight_candidates}"
+                }
+            continue
+
+        progress_container.info(f"Memuat model {cfg.display_name}...")
+        try:
+            detector = load_detector_uncached(cfg)
+        except Exception as e:
+            for filename, _ in extracted_videos:
+                bulk_results[filename][cfg.key] = {
+                    "error": f"Gagal memuat model: {e}"
+                }
+            continue
+
+        try:
+            for filename, video_path in extracted_videos:
+                progress_container.info(f"Memproses [{filename}] menggunakan {cfg.display_name}...")
+                per_model_progress = st.progress(0)
+                try:
+                    output_path, mime, records, error = process_video_with_detector(
+                        video_path,
+                        cfg,
+                        detector,
+                        pose_model if cfg.input_mode == "Skeleton" else None,
+                        threshold,
+                        per_model_progress,
+                        progress_container,
+                        source_type="video_upload_bulk"
+                    )
+                    per_model_progress.empty()
+
+                    if error:
+                        bulk_results[filename][cfg.key] = {"error": error}
+                    else:
+                        bulk_results[filename][cfg.key] = {"path": output_path, "mime": mime}
+                        for rec in records:
+                            rec["video_name"] = filename
+                        all_records.extend(records)
+                except Exception as e:
+                    per_model_progress.empty()
+                    bulk_results[filename][cfg.key] = {
+                        "error": f"Error memproses video: {e}"
+                    }
+        finally:
+            unload_model(detector)
+
+    progress_container.success("Semua model selesai memproses semua video.")
+    
+    # Cleanup extracted temp files
+    for _, temp_path in extracted_videos:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except Exception:
+            pass
+
+    return bulk_results, all_records
+
+
 def process_video_for_model(
     input_video_path: Path, cfg: ModelConfig, threshold: float, progress, status
 ) -> Tuple[Optional[Path], Optional[str], List[Dict], Optional[str]]:
@@ -1105,6 +1409,208 @@ def display_image_results(results: Dict[str, Dict], records: List[Dict]):
         )
 
 
+def display_bulk_image_results(bulk_results: Dict[str, Dict[str, Dict]], records: List[Dict]):
+    st.subheader("Hasil Inferensi Bulk Gambar - Ringkasan")
+    
+    summary_data = []
+    for filename, results in bulk_results.items():
+        row = {"Nama File": filename}
+        for cfg in MODEL_CONFIGS:
+            res = results.get(cfg.key, {})
+            if "error" in res:
+                row[cfg.display_name] = "⚠️ Error"
+            elif "pred" in res:
+                pred = res["pred"]
+                if pred and pred.get("class_id") is not None and any(int(cid) == 0 for cid in pred["class_id"]):
+                    max_conf = max([float(conf) for conf, cid in zip(pred["confidence"], pred["class_id"]) if int(cid) == 0], default=0.0)
+                    row[cfg.display_name] = f"🚨 Jatuh ({max_conf:.2%})"
+                else:
+                    row[cfg.display_name] = "🟢 Aman (No-Fall)"
+            else:
+                row[cfg.display_name] = "Belum Diproses"
+        summary_data.append(row)
+    
+    st.dataframe(summary_data, use_container_width=True)
+    
+    csv_bytes = records_to_csv_bytes(records)
+    col_dl1, col_dl2 = st.columns(2)
+    if csv_bytes:
+        with col_dl1:
+            st.download_button(
+                "Download CSV Ringkasan Semua Gambar",
+                csv_bytes,
+                file_name="bulk_image_all_models_metrics.csv",
+                mime="text/csv",
+                key="dl_bulk_image_csv"
+            )
+        
+        bulk_file_map = {}
+        for filename, results in bulk_results.items():
+            base_name = Path(filename).stem
+            for cfg in MODEL_CONFIGS:
+                res = results.get(cfg.key, {})
+                if "png_bytes" in res:
+                    out_filename = f"{base_name}_{safe_filename(cfg.display_name)}.png"
+                    tmp_img = (
+                        Path(tempfile.gettempdir())
+                        / f"{base_name}_{safe_filename(cfg.display_name)}_{int(time.time() * 1000)}.png"
+                    )
+                    tmp_img.write_bytes(res["png_bytes"])
+                    bulk_file_map[f"images/{out_filename}"] = tmp_img
+
+        zip_bytes = make_zip_from_files(
+            bulk_file_map,
+            {"metrics/bulk_image_all_models_metrics.csv": csv_bytes.decode("utf-8")},
+        )
+        
+        with col_dl2:
+            st.download_button(
+                "Download ZIP Semua Output Gambar",
+                zip_bytes,
+                file_name="bulk_image_all_models_outputs.zip",
+                mime="application/zip",
+                key="dl_bulk_image_zip"
+            )
+
+    st.markdown("---")
+    st.subheader("Detail Hasil Per Gambar")
+    selected_filename = st.selectbox(
+        "Pilih file gambar untuk melihat detail:",
+        options=list(bulk_results.keys()),
+        key="bulk_image_detail_select"
+    )
+    
+    if selected_filename:
+        results = bulk_results[selected_filename]
+        st.markdown(f"### Output Gambar: **{selected_filename}**")
+        cols = st.columns(2)
+        for idx, cfg in enumerate(MODEL_CONFIGS):
+            result = results.get(cfg.key, {})
+            with cols[idx % 2]:
+                st.markdown(f"#### {cfg.display_name}")
+                if "error" in result:
+                    st.error(result["error"])
+                    continue
+                if "annotated" in result:
+                    st.image(
+                        result["annotated"],
+                        caption=f"Output {cfg.display_name} - {selected_filename}",
+                        use_container_width=True,
+                    )
+                    st.write(f"**Deteksi:** {format_detection_result(result['pred'])}")
+                    show_metrics_row(result["metrics"])
+                    filename = f"{Path(selected_filename).stem}_{safe_filename(cfg.display_name)}.png"
+                    st.download_button(
+                        f"Download PNG - {cfg.short_label}",
+                        result["png_bytes"],
+                        file_name=filename,
+                        mime="image/png",
+                        key=f"dl_bulk_img_{cfg.key}_{selected_filename}",
+                    )
+
+
+def display_bulk_video_results(bulk_video_results: Dict[str, Dict[str, Dict]], records: List[Dict]):
+    st.subheader("Hasil Inferensi Bulk Video - Ringkasan")
+
+    summary_data = []
+    for filename, results in bulk_video_results.items():
+        row = {"Nama File": filename}
+        for cfg in MODEL_CONFIGS:
+            res = results.get(cfg.key, {})
+            if "error" in res:
+                row[cfg.display_name] = "⚠️ Error"
+            elif "path" in res:
+                video_records = [r for r in records if r.get("video_name") == filename and r.get("model_key") == cfg.key]
+                fall_frames = sum(1 for r in video_records if "Fall" in r.get("detections", ""))
+                total_frames = len(video_records)
+                if fall_frames > 0:
+                    row[cfg.display_name] = f"🚨 Jatuh ({fall_frames}/{total_frames} frame)"
+                else:
+                    row[cfg.display_name] = f"🟢 Aman ({total_frames} frame)"
+            else:
+                row[cfg.display_name] = "Belum Diproses"
+        summary_data.append(row)
+
+    st.dataframe(summary_data, use_container_width=True)
+
+    csv_bytes = records_to_csv_bytes(records)
+    col_dl1, col_dl2 = st.columns(2)
+    if csv_bytes:
+        with col_dl1:
+            st.download_button(
+                "Download CSV Ringkasan Semua Video",
+                csv_bytes,
+                file_name="bulk_video_all_models_metrics.csv",
+                mime="text/csv",
+                key="dl_bulk_video_csv"
+            )
+
+        bulk_file_map = {}
+        for filename, results in bulk_video_results.items():
+            base_name = Path(filename).stem
+            for cfg in MODEL_CONFIGS:
+                res = results.get(cfg.key, {})
+                if "path" in res and res["path"]:
+                    path = Path(res["path"])
+                    if path.exists():
+                        ext = path.suffix
+                        out_filename = f"{base_name}_{safe_filename(cfg.display_name)}{ext}"
+                        bulk_file_map[f"videos/{out_filename}"] = path
+
+        zip_bytes = make_zip_from_files(
+            bulk_file_map,
+            {"metrics/bulk_video_all_models_metrics.csv": csv_bytes.decode("utf-8")},
+        )
+
+        with col_dl2:
+            st.download_button(
+                "Download ZIP Semua Output Video",
+                zip_bytes,
+                file_name="bulk_video_all_models_outputs.zip",
+                mime="application/zip",
+                key="dl_bulk_video_zip"
+            )
+
+    st.markdown("---")
+    st.subheader("Detail Hasil Per Video")
+    selected_filename = st.selectbox(
+        "Pilih file video untuk melihat detail:",
+        options=list(bulk_video_results.keys()),
+        key="bulk_video_detail_select"
+    )
+
+    if selected_filename:
+        results = bulk_video_results[selected_filename]
+        st.markdown(f"### Output Video: **{selected_filename}**")
+        cols = st.columns(2)
+        for idx, cfg in enumerate(MODEL_CONFIGS):
+            output = results.get(cfg.key, {})
+            with cols[idx % 2]:
+                st.markdown(f"#### {cfg.display_name}")
+                if output.get("error"):
+                    st.error(output["error"])
+                    continue
+                path = output.get("path")
+                mime = output.get("mime") or "video/mp4"
+                if path and Path(path).exists():
+                    data = read_file_bytes(Path(path))
+                    try:
+                        st.video(data)
+                    except Exception:
+                        st.caption(
+                            "Preview video tidak tersedia, tetapi file tetap bisa diunduh."
+                        )
+                    ext = ".mp4" if mime == "video/mp4" else ".avi"
+                    filename = f"bulk_{Path(selected_filename).stem}_{safe_filename(cfg.display_name)}{ext}"
+                    st.download_button(
+                        f"Download Video - {cfg.short_label}",
+                        data,
+                        file_name=filename,
+                        mime=mime,
+                        key=f"dl_bulk_video_{cfg.key}_{selected_filename}",
+                    )
+
+
 def display_video_downloads(
     video_outputs: Dict[str, Dict], all_records: List[Dict], prefix: str
 ):
@@ -1246,26 +1752,60 @@ if source_option == "Unggah Gambar":
         "Gambar akan diproses oleh empat pipeline secara bergantian: RF-DETR RGB, RF-DETR Skeleton, YOLO RGB, dan YOLO Skeleton."
     )
 
-    uploaded_img = st.sidebar.file_uploader(
-        "Pilih file gambar...", type=["jpg", "jpeg", "png"]
+    upload_type = st.sidebar.radio(
+        "Tipe Unggahan Gambar:",
+        ["Satu Gambar", "Banyak Gambar / ZIP"],
+        key="image_upload_type"
     )
-    if uploaded_img:
-        image_rgb = np.array(Image.open(uploaded_img).convert("RGB"))
-        st.subheader("Gambar Asli")
-        st.image(image_rgb, use_container_width=True)
 
-        if st.button("Mulai Inferensi Semua Model", type="primary"):
-            progress_container = st.empty()
-            results, records = process_image_all_models(
-                image_rgb, conf_detection, progress_container
-            )
-            st.session_state["image_results"] = results
-            st.session_state["image_records"] = records
-
-    if st.session_state.get("image_results"):
-        display_image_results(
-            st.session_state["image_results"], st.session_state.get("image_records", [])
+    if upload_type == "Satu Gambar":
+        uploaded_img = st.sidebar.file_uploader(
+            "Pilih file gambar...", type=["jpg", "jpeg", "png"]
         )
+        if uploaded_img:
+            image_rgb = np.array(Image.open(uploaded_img).convert("RGB"))
+            st.subheader("Gambar Asli")
+            st.image(image_rgb, use_container_width=True)
+
+            if st.button("Mulai Inferensi Semua Model", type="primary"):
+                progress_container = st.empty()
+                results, records = process_image_all_models(
+                    image_rgb, conf_detection, progress_container
+                )
+                st.session_state["image_results"] = results
+                st.session_state["image_records"] = records
+
+        if st.session_state.get("image_results"):
+            display_image_results(
+                st.session_state["image_results"], st.session_state.get("image_records", [])
+            )
+    else:
+        uploaded_imgs = st.sidebar.file_uploader(
+            "Pilih file gambar atau ZIP...", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True
+        )
+        if uploaded_imgs:
+            extracted = extract_images_from_uploaded_files(uploaded_imgs)
+            if not extracted:
+                st.warning("Tidak ada file gambar valid yang ditemukan.")
+            else:
+                st.info(f"Ditemukan {len(extracted)} file gambar valid.")
+                with st.expander("Daftar File Gambar", expanded=False):
+                    for filename, _ in extracted:
+                        st.write(f"- {filename}")
+
+                if st.button("Mulai Proses Bulk Semua Gambar", type="primary"):
+                    progress_container = st.empty()
+                    bulk_results, bulk_records = process_bulk_images(
+                        extracted, conf_detection, progress_container
+                    )
+                    st.session_state["bulk_image_results"] = bulk_results
+                    st.session_state["bulk_image_records"] = bulk_records
+
+        if st.session_state.get("bulk_image_results"):
+            display_bulk_image_results(
+                st.session_state["bulk_image_results"],
+                st.session_state.get("bulk_image_records", [])
+            )
 
 
 # =========================================================
@@ -1415,49 +1955,83 @@ elif source_option == "Unggah Video":
         "Video diproses oleh semua model secara bergantian. Setiap model menghasilkan video output dan CSV metrik."
     )
 
-    uploaded_video = st.sidebar.file_uploader(
-        "Pilih file video...", type=["mp4", "avi", "mov", "mkv"]
+    upload_type = st.sidebar.radio(
+        "Tipe Unggahan Video:",
+        ["Satu Video", "Banyak Video / ZIP"],
+        key="video_upload_type"
     )
-    if uploaded_video:
-        suffix = Path(uploaded_video.name).suffix or ".mp4"
-        temp_orig = (
-            Path(tempfile.gettempdir()) / f"uploaded_{int(time.time() * 1000)}{suffix}"
+
+    if upload_type == "Satu Video":
+        uploaded_video = st.sidebar.file_uploader(
+            "Pilih file video...", type=["mp4", "avi", "mov", "mkv"]
         )
-        temp_orig.write_bytes(uploaded_video.read())
-        st.video(read_file_bytes(temp_orig))
+        if uploaded_video:
+            suffix = Path(uploaded_video.name).suffix or ".mp4"
+            temp_orig = (
+                Path(tempfile.gettempdir()) / f"uploaded_{int(time.time() * 1000)}{suffix}"
+            )
+            temp_orig.write_bytes(uploaded_video.read())
+            st.video(read_file_bytes(temp_orig))
 
-        if st.button("Mulai Proses Semua Model", type="primary"):
-            video_outputs = {}
-            all_records = []
-            total = len(MODEL_CONFIGS)
-            overall = st.progress(0)
-            status = st.empty()
+            if st.button("Mulai Proses Semua Model", type="primary"):
+                video_outputs = {}
+                all_records = []
+                total = len(MODEL_CONFIGS)
+                overall = st.progress(0)
+                status = st.empty()
 
-            for idx, cfg in enumerate(MODEL_CONFIGS):
-                status.info(f"Memproses {cfg.display_name} ({idx + 1}/{total})...")
-                per_model_progress = st.progress(0)
-                output_path, mime, records, error = process_video_for_model(
-                    temp_orig, cfg, conf_detection, per_model_progress, status
-                )
-                per_model_progress.empty()
+                for idx, cfg in enumerate(MODEL_CONFIGS):
+                    status.info(f"Memproses {cfg.display_name} ({idx + 1}/{total})...")
+                    per_model_progress = st.progress(0)
+                    output_path, mime, records, error = process_video_for_model(
+                        temp_orig, cfg, conf_detection, per_model_progress, status
+                    )
+                    per_model_progress.empty()
 
-                if error:
-                    video_outputs[cfg.key] = {"error": error}
-                else:
-                    video_outputs[cfg.key] = {"path": output_path, "mime": mime}
-                    all_records.extend(records)
-                overall.progress((idx + 1) / total)
+                    if error:
+                        video_outputs[cfg.key] = {"error": error}
+                    else:
+                        video_outputs[cfg.key] = {"path": output_path, "mime": mime}
+                        all_records.extend(records)
+                    overall.progress((idx + 1) / total)
 
-            status.success("Semua model selesai memproses video.")
-            st.session_state["video_outputs"] = video_outputs
-            st.session_state["video_records"] = all_records
+                status.success("Semua model selesai memproses video.")
+                st.session_state["video_outputs"] = video_outputs
+                st.session_state["video_records"] = all_records
 
-    if st.session_state.get("video_outputs"):
-        display_video_downloads(
-            st.session_state["video_outputs"],
-            st.session_state.get("video_records", []),
-            prefix="uploaded_video",
+        if st.session_state.get("video_outputs"):
+            display_video_downloads(
+                st.session_state["video_outputs"],
+                st.session_state.get("video_records", []),
+                prefix="uploaded_video",
+            )
+    else:
+        uploaded_videos = st.sidebar.file_uploader(
+            "Pilih file video atau ZIP...", type=["mp4", "avi", "mov", "mkv", "zip"], accept_multiple_files=True
         )
+        if uploaded_videos:
+            extracted = extract_videos_from_uploaded_files(uploaded_videos)
+            if not extracted:
+                st.warning("Tidak ada file video valid yang ditemukan.")
+            else:
+                st.info(f"Ditemukan {len(extracted)} file video valid.")
+                with st.expander("Daftar File Video", expanded=False):
+                    for filename, _ in extracted:
+                        st.write(f"- {filename}")
+
+                if st.button("Mulai Proses Bulk Semua Video", type="primary"):
+                    progress_container = st.empty()
+                    bulk_video_results, bulk_video_records = process_bulk_videos(
+                        extracted, conf_detection, progress_container
+                    )
+                    st.session_state["bulk_video_results"] = bulk_video_results
+                    st.session_state["bulk_video_records"] = bulk_video_records
+
+        if st.session_state.get("bulk_video_results"):
+            display_bulk_video_results(
+                st.session_state["bulk_video_results"],
+                st.session_state.get("bulk_video_records", [])
+            )
 
 
 # =========================================================
